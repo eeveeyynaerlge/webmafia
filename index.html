@@ -8,6 +8,7 @@
     <script src="cdn.socket.io"></script>
     <style>
         body { font-family: sans-serif; max-width: 800px; margin: auto; padding: 20px; }
+        #lobby, #game-container { display: none; }
         #game-container { display: flex; gap: 20px; }
         #chat-window { flex-grow: 1; height: 400px; border: 1px solid #ccc; padding: 10px; overflow-y: scroll; display: flex; flex-direction: column-reverse; }
         #chat-messages { list-style-type: none; padding: 0; }
@@ -19,64 +20,130 @@
         #player-list li:hover { background: #ddd; }
         .alive { color: black; }
         .dead { color: gray; text-decoration: line-through; }
+        #role-actions button { margin-top: 5px; padding: 5px; }
     </style>
 </head>
 <body>
-    <h1>Mafia Game Lobby</h1>
-    <p>Your Role: <strong id="my-role">Pending Assignment</strong></p>
-    <button onclick="startGame()" id="start-btn">Start Game (Host only)</button>
-    <hr>
-    
+    <h1>Mafia Game</h1>
+
+    <div id="lobby">
+        <input type="text" id="room-id-input" placeholder="Enter Room ID">
+        <button onclick="joinRoom()">Join Room</button>
+        <button onclick="createRoom()">Create Room</button>
+    </div>
+
     <div id="game-container">
-        <div id="chat-area">
-            <h2>In-Game Chat</h2>
-            <div id="chat-window">
-                <ul id="chat-messages"></ul>
+        <div id="main-area">
+            <p>Room ID: <strong id="display-room-id"></strong> | Your Role: <strong id="my-role">...</strong></p>
+            <button onclick="startGame()" id="start-btn">Start Game (Host only)</button>
+            <div id="role-actions" style="display: none;">
+                <!-- Role specific actions inserted here by JS -->
             </div>
-            <form id="controls" onsubmit="sendMessage(event)">
-                <input id="m" autocomplete="off" placeholder="Type a message..." /><button>Send</button>
-            </form>
+            <hr>
+            <div id="chat-area">
+                <h2>Game Chat</h2>
+                <div id="chat-window">
+                    <ul id="chat-messages"></ul>
+                </div>
+                <form id="controls" onsubmit="sendMessage(event)">
+                    <input id="m" autocomplete="off" placeholder="Type general chat message..." />
+                    <button>Send</button>
+                </form>
+                <form id="mafia-controls" style="display: none;" onsubmit="sendMafiaMessage(event)">
+                    <input id="m-mafia" autocomplete="off" placeholder="Type mafia team chat message..." />
+                    <button>Send Mafia</button>
+                </form>
+            </div>
         </div>
         <div id="players-sidebar">
-            <h2>Players (Click to Vote)</h2>
+            <h2>Players (Click to Interact)</h2>
             <ul id="player-list"></ul>
         </div>
     </div>
 
     <script>
-        // *** RENDER DEPLOYMENT URL IS SET BELOW ***
         const SOCKET_URL = 'https://mafia-backend-vrky.onrender.com'; 
         const socket = io(SOCKET_URL);
 
+        let currentRoomId = '';
+        let myRole = '';
+
+        const lobbyDiv = document.getElementById('lobby');
+        const gameContainerDiv = document.getElementById('game-container');
+        const displayRoomIdStrong = document.getElementById('display-room-id');
         const chatMessages = document.getElementById('chat-messages');
         const playerList = document.getElementById('player-list');
         const myRoleElem = document.getElementById('my-role');
         const startButton = document.getElementById('start-btn');
+        const mafiaControls = document.getElementById('mafia-controls');
+        const roleActionsDiv = document.getElementById('role-actions');
 
+        // --- Lobby Functions ---
+        function createRoom() {
+            socket.emit('create-room', { settings: 'default' });
+        }
+
+        function joinRoom() {
+            const roomId = document.getElementById('room-id-input').value;
+            if (roomId) {
+                socket.emit('join-room', roomId);
+            }
+        }
+
+        socket.on('room-created', (roomId) => {
+            currentRoomId = roomId;
+            lobbyDiv.style.display = 'none';
+            gameContainerDiv.style.display = 'flex';
+            displayRoomIdStrong.textContent = roomId;
+            addChatMessage({ name: 'System', message: `Room ${roomId} created. Share the ID.` });
+        });
+
+        socket.on('joined-room', (roomId) => {
+            currentRoomId = roomId;
+            lobbyDiv.style.display = 'none';
+            gameContainerDiv.style.display = 'flex';
+            displayRoomIdStrong.textContent = roomId;
+            addChatMessage({ name: 'System', message: `Joined room ${roomId}.` });
+        });
+        
+        socket.on('error', (message) => {
+            alert(message);
+        });
+
+        // --- Game Functions ---
         function sendMessage(event) {
             event.preventDefault();
             const messageInput = document.getElementById('m');
-            if (messageInput.value) {
-                socket.emit('chat-message', messageInput.value);
+            if (messageInput.value && currentRoomId) {
+                socket.emit('chat-message', { roomId: currentRoomId, message: messageInput.value });
+                messageInput.value = '';
+            }
+        }
+
+        function sendMafiaMessage(event) {
+            event.preventDefault();
+            const messageInput = document.getElementById('m-mafia');
+            if (messageInput.value && currentRoomId) {
+                socket.emit('mafia-chat-message', { roomId: currentRoomId, message: messageInput.value });
                 messageInput.value = '';
             }
         }
 
         function startGame() {
-            socket.emit('start-game');
+            socket.emit('start-game', currentRoomId);
         }
 
-        function vote(targetId, targetName) {
-            if (confirm(`Are you sure you want to vote for ${targetName}?`)) {
-                socket.emit('submit-vote', targetId);
-                addChatMessage({ name: 'System', message: `You voted for ${targetName}.` });
+        function submitRoleAction(targetId, actionType) {
+            if (confirm(`Confirm action on target: ${targetId}?`)) {
+                socket.emit('night-action', { roomId: currentRoomId, targetId: targetId });
+                addChatMessage({ name: 'System', message: `Submitted ${actionType} action on target.` });
             }
         }
-
+        
         function addChatMessage(msg) {
             const item = document.createElement('li');
             item.textContent = `${msg.name}: ${msg.message}`;
-            chatMessages.prepend(item); // Add to the top
+            chatMessages.prepend(item);
         }
 
         socket.on('chat-message', addChatMessage);
@@ -87,24 +154,37 @@
                 const item = document.createElement('li');
                 item.textContent = player.name + (player.alive ? '' : ' (Dead)');
                 item.classList.add(player.alive ? 'alive' : 'dead');
-                // Add click handler for voting
-                if (player.alive) {
-                    item.onclick = () => vote(player.id, player.name);
-                }
+                // General interaction (voting during day, role actions at night)
+                item.onclick = () => {
+                    if (confirm(`Interact with ${player.name}?`)) {
+                        // In day time, this should be the vote function
+                        socket.emit('submit-vote', { roomId: currentRoomId, targetId: player.id });
+                    }
+                };
                 playerList.appendChild(item);
             });
         });
 
         socket.on('game-started', () => {
             startButton.style.display = 'none';
-            addChatMessage({ name: 'Game Master', message: 'Game UI is active. Check your role above!' });
         });
 
         socket.on('role-assigned', (role) => {
+            myRole = role;
             myRoleElem.textContent = role;
             addChatMessage({ name: 'System', message: `You are a ${role}!` });
-            // Here you would add UI elements specific to Doctor/Detective (night action buttons)
+            if (role === 'Mafia') {
+                mafiaControls.style.display = 'flex';
+            }
+            // Add night action buttons dynamically (needs more work to manage UI state between day/night)
         });
+
+        socket.on('detective-result', (result) => {
+            addChatMessage({ name: 'Detective Info', message: result });
+        });
+
+        // Need more socket listeners for day/night transitions to manage UI elements (e.g., hiding general chat at night, showing role actions)
+
     </script>
 </body>
 </html>
