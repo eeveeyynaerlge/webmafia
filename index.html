@@ -1,0 +1,110 @@
+<!-- index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mafia Web Game</title>
+    <script src="cdn.socket.io"></script>
+    <style>
+        body { font-family: sans-serif; max-width: 800px; margin: auto; padding: 20px; }
+        #game-container { display: flex; gap: 20px; }
+        #chat-window { flex-grow: 1; height: 400px; border: 1px solid #ccc; padding: 10px; overflow-y: scroll; display: flex; flex-direction: column-reverse; }
+        #chat-messages { list-style-type: none; padding: 0; }
+        #chat-messages li { padding: 5px 0; border-bottom: 1px solid #eee; }
+        #controls { display: flex; margin-top: 10px; }
+        #m { flex-grow: 1; padding: 10px; }
+        #players-sidebar { width: 200px; }
+        #player-list li { cursor: pointer; padding: 5px; margin-bottom: 2px; background: #f4f4f4; }
+        #player-list li:hover { background: #ddd; }
+        .alive { color: black; }
+        .dead { color: gray; text-decoration: line-through; }
+    </style>
+</head>
+<body>
+    <h1>Mafia Game Lobby</h1>
+    <p>Your Role: <strong id="my-role">Pending Assignment</strong></p>
+    <button onclick="startGame()" id="start-btn">Start Game (Host only)</button>
+    <hr>
+    
+    <div id="game-container">
+        <div id="chat-area">
+            <h2>In-Game Chat</h2>
+            <div id="chat-window">
+                <ul id="chat-messages"></ul>
+            </div>
+            <form id="controls" onsubmit="sendMessage(event)">
+                <input id="m" autocomplete="off" placeholder="Type a message..." /><button>Send</button>
+            </form>
+        </div>
+        <div id="players-sidebar">
+            <h2>Players (Click to Vote)</h2>
+            <ul id="player-list"></ul>
+        </div>
+    </div>
+
+    <script>
+        // *** RENDER DEPLOYMENT URL IS SET BELOW ***
+        const SOCKET_URL = 'https://mafia-backend-vrky.onrender.com'; 
+        const socket = io(SOCKET_URL);
+
+        const chatMessages = document.getElementById('chat-messages');
+        const playerList = document.getElementById('player-list');
+        const myRoleElem = document.getElementById('my-role');
+        const startButton = document.getElementById('start-btn');
+
+        function sendMessage(event) {
+            event.preventDefault();
+            const messageInput = document.getElementById('m');
+            if (messageInput.value) {
+                socket.emit('chat-message', messageInput.value);
+                messageInput.value = '';
+            }
+        }
+
+        function startGame() {
+            socket.emit('start-game');
+        }
+
+        function vote(targetId, targetName) {
+            if (confirm(`Are you sure you want to vote for ${targetName}?`)) {
+                socket.emit('submit-vote', targetId);
+                addChatMessage({ name: 'System', message: `You voted for ${targetName}.` });
+            }
+        }
+
+        function addChatMessage(msg) {
+            const item = document.createElement('li');
+            item.textContent = `${msg.name}: ${msg.message}`;
+            chatMessages.prepend(item); // Add to the top
+        }
+
+        socket.on('chat-message', addChatMessage);
+
+        socket.on('update-players', (players) => {
+            playerList.innerHTML = '';
+            players.forEach(player => {
+                const item = document.createElement('li');
+                item.textContent = player.name + (player.alive ? '' : ' (Dead)');
+                item.classList.add(player.alive ? 'alive' : 'dead');
+                // Add click handler for voting
+                if (player.alive) {
+                    item.onclick = () => vote(player.id, player.name);
+                }
+                playerList.appendChild(item);
+            });
+        });
+
+        socket.on('game-started', () => {
+            startButton.style.display = 'none';
+            addChatMessage({ name: 'Game Master', message: 'Game UI is active. Check your role above!' });
+        });
+
+        socket.on('role-assigned', (role) => {
+            myRoleElem.textContent = role;
+            addChatMessage({ name: 'System', message: `You are a ${role}!` });
+            // Here you would add UI elements specific to Doctor/Detective (night action buttons)
+        });
+    </script>
+</body>
+</html>
